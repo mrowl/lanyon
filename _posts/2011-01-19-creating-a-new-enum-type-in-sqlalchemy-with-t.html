@@ -1,0 +1,29 @@
+---
+layout: post
+title: Creating a new enum type in sqlalchemy with the type decorator
+date: '2011-01-19T13:17:00-05:00'
+tags:
+- JustMigrated
+- postgresql
+- python
+- sqlalchemy
+tumblr_url: http://sortedaffairs.tumblr.com/post/49113601454/creating-a-new-enum-type-in-sqlalchemy-with-t
+---
+<p>I wasn’t satisfied with the built-in <a href="http://www.sqlalchemy.org/docs/core/types.html#sqlalchemy.types.Enum">EnumType</a> that SQLAlchemy offers for column definitions because it’s limited to using the native sql enum type or a large varchar. The native sql enum isn’t a bad choice if you’re using MySQL, but I’ve found the postgres (which is what I’m using) implementation to be too rigid since you can’t easily alter the list of possible values. The varchar is overkill and takes up too much storage space.</p>
+
+<p>I settled on storage using a small integer due to its small footprint while still allowing a large bucket of values. I was initially planning on using the integers in the code and trying to remember what each integer represented but my feeble mind wasn’t up for the challenge. So I found the <a href="http://www.sqlalchemy.org/docs/core/types.html#custom-types">SQLAlchemy TypeDecorator</a> class which makes it dead simple to create a custom column type:</p>
+
+<p><a href="https://gist.github.com/786501">https://gist.github.com/786501</a></p>
+
+<p>Using the new type is very similar to the generic EnumType:</p>
+
+<div class="CodeRay">
+  <div class="code"><pre><span class="comment">#in your table declaration</span>
+animal_table = sa.Table(<span class="string"><span class="delimiter">"</span><span class="content">title</span><span class="delimiter">"</span></span>, meta,
+    sa.Column(<span class="string"><span class="delimiter">"</span><span class="content">name</span><span class="delimiter">"</span></span>, sa.types.Unicode(<span class="integer">31</span>), nullable=<span class="predefined-constant">False</span>),
+    sa.Column(<span class="string"><span class="delimiter">"</span><span class="content">type</span><span class="delimiter">"</span></span>, EnumIntType((<span class="string"><span class="delimiter">"</span><span class="content">dog</span><span class="delimiter">"</span></span>, <span class="string"><span class="delimiter">"</span><span class="content">cat</span><span class="delimiter">"</span></span>, <span class="string"><span class="delimiter">"</span><span class="content">narwhal</span><span class="delimiter">"</span></span>)), nullable=<span class="predefined-constant">False</span>),
+    )
+
+<span class="comment">#in a query</span>
+session.query(Animal).filter(Animal.type == <span class="string"><span class="delimiter">"</span><span class="content">cat</span><span class="delimiter">"</span></span>).all()</pre></div>
+</div>

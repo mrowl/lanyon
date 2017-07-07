@@ -1,0 +1,197 @@
+---
+layout: post
+title: Using PostgreSQL arrays with GiN indexes for fast tag filtering
+date: '2011-08-16T15:06:00-04:00'
+tags:
+- JustMigrated
+- gin
+- optimization
+- postgresql
+tumblr_url: http://sortedaffairs.tumblr.com/post/49113597643/using-postgresql-arrays-with-gin-indexes-for
+---
+<h2>The setup</h2>
+
+<p>A major feature on sites like <a href="http://www.yelp.com">yelp</a> and
+<a href="http://filmlust.com/title">filmlust</a> is the ability to quickly drill
+down search results by filtering in/out unwanted tags. In a typical
+normalized relational db the tags would have a many-to-many
+relationship with the main objects and they would be stored in a
+separate table with an association table joining the two. This leads
+to painfully slow filtering queries. A better method is to add a
+“tags” column using <a href="http://www.postgresql.org/docs/9.0/static/arrays.html">PostgreSQL’s array
+type</a> to the
+main table and store the tags as text in there. For example…</p>
+
+<h3>Create a new table</h3>
+
+<div class="CodeRay">
+  <div class="code"><pre><span class="class">CREATE</span> <span class="type">TABLE</span> posts (post_id <span class="predefined-type">INTEGER</span>, title <span class="predefined-type">TEXT</span>, content <span class="predefined-type">TEXT</span>, tags <span class="predefined-type">TEXT</span>[]);
+<span class="class">INSERT</span> <span class="class">INTO</span> posts (post_id, title, content, tags) <span class="keyword">VALUES</span> (<span class="integer">1</span>, <span class="string"><span class="delimiter">'</span><span class="content">el posto numero uno</span><span class="delimiter">'</span></span>, <span class="string"><span class="delimiter">'</span><span class="content">witticisms here</span><span class="delimiter">'</span></span>, <span class="string"><span class="delimiter">'</span><span class="content">{"bacon", "chunky"}</span><span class="delimiter">'</span></span>);
+<span class="class">INSERT</span> <span class="class">INTO</span> posts (post_id, title, content, tags) <span class="keyword">VALUES</span> (<span class="integer">2</span>, <span class="string"><span class="delimiter">'</span><span class="content">el posto numero dos</span><span class="delimiter">'</span></span>, <span class="string"><span class="delimiter">'</span><span class="content">mas witticisms here</span><span class="delimiter">'</span></span>, <span class="string"><span class="delimiter">'</span><span class="content">{"chunky", "fauna"}</span><span class="delimiter">'</span></span>);
+<span class="class">INSERT</span> <span class="class">INTO</span> posts (post_id, title, content, tags) <span class="keyword">VALUES</span> (<span class="integer">3</span>, <span class="string"><span class="delimiter">'</span><span class="content">el posto numero tres</span><span class="delimiter">'</span></span>, <span class="string"><span class="delimiter">'</span><span class="content">plus witticisms here</span><span class="delimiter">'</span></span>, <span class="string"><span class="delimiter">'</span><span class="content">{"bacon", "fauna"}</span><span class="delimiter">'</span></span>);</pre></div>
+</div>
+
+
+<h3>Alter an existing table</h3>
+
+<div class="CodeRay">
+  <div class="code"><pre><span class="class">ALTER</span> <span class="type">TABLE</span> posts <span class="class">ADD</span> <span class="type">COLUMN</span> tags <span class="predefined-type">TEXT</span>[]; <span class="comment">#add the array of text values</span>
+<span class="class">UPDATE</span> posts <span class="class">SET</span> tags=<span class="string"><span class="delimiter">'</span><span class="content">{"bacon", "chunky"}</span><span class="delimiter">'</span></span> <span class="keyword">WHERE</span> post_id=;</pre></div>
+</div>
+
+
+<h2>Querying</h2>
+
+<p>So the table is all set to go and the tags column is populated for all
+your items. Another advantage of using arrays over normalization is
+more intuitive queries, particularly for some of the more complex
+queries. To search for all posts tagged with “bacon” with the
+traditional many-to-many setup…</p>
+
+<div class="CodeRay">
+  <div class="code"><pre><span class="class">SELECT</span> p.* <span class="keyword">FROM</span> posts <span class="keyword">AS</span> p <span class="keyword">JOIN</span> posts_tags_assoc <span class="keyword">AS</span> pta <span class="keyword">ON</span> p.post_id=pta.post_id <span class="keyword">JOIN</span> tags t <span class="keyword">ON</span> pta.tag_id=t.tag_id <span class="keyword">WHERE</span> t.name = <span class="string"><span class="delimiter">'</span><span class="content">bacon</span><span class="delimiter">'</span></span>;</pre></div>
+</div>
+
+
+<p>vs. the new array columns…</p>
+
+<div class="CodeRay">
+  <div class="code"><pre><span class="class">SELECT</span> posts.* <span class="keyword">FROM</span> posts <span class="keyword">WHERE</span> <span class="string"><span class="delimiter">'</span><span class="content">bacon</span><span class="delimiter">'</span></span> = <span class="keyword">ANY</span> (tags);</pre></div>
+</div>
+
+
+<p>This is certainly more elegant, but the array type really shines when
+using the <a href="http://www.postgresql.org/docs/8.4/static/functions-array.html">array operators</a>
+to do overlaps and subsets. To find all posts which are tagged by “chunky” <em>or</em> “bacon” (an overlap) or to find the posts tagged by both “chunky” <em>and</em> “bacon” (a subset, or “is contained by” in postgres verbiage) in the normalized tables:</p>
+
+<div class="CodeRay">
+  <div class="code"><pre><span class="class">SELECT</span> <span class="keyword">DISTINCT</span>(p.*) <span class="keyword">FROM</span> posts <span class="keyword">AS</span> p <span class="keyword">JOIN</span> posts_tags_assoc <span class="keyword">AS</span> pta <span class="keyword">ON</span> p.post_id=pta.post_id <span class="keyword">JOIN</span> tags t <span class="keyword">ON</span> pta.tag_id=t.tag_id <span class="keyword">WHERE</span> t.name <span class="keyword">IN</span> (<span class="string"><span class="delimiter">'</span><span class="content">bacon</span><span class="delimiter">'</span></span>, <span class="string"><span class="delimiter">'</span><span class="content">chunky</span><span class="delimiter">'</span></span>); <span class="comment"># overlap</span>
+<span class="class">SELECT</span> p.post_id, p.title, p.content <span class="keyword">FROM</span> posts <span class="keyword">AS</span> p <span class="keyword">JOIN</span> posts_tags_assoc <span class="keyword">AS</span> pta <span class="keyword">ON</span> p.post_id=pta.post_id <span class="keyword">JOIN</span> tags t <span class="keyword">ON</span> pta.tag_id=t.tag_id <span class="keyword">WHERE</span> t.name <span class="keyword">IN</span> (<span class="string"><span class="delimiter">'</span><span class="content">bacon</span><span class="delimiter">'</span></span>, <span class="string"><span class="delimiter">'</span><span class="content">chunky</span><span class="delimiter">'</span></span>) <span class="keyword">GROUP</span> <span class="keyword">BY</span> p.post_id, p.name, p.content <span class="keyword">HAVING</span> <span class="predefined">COUNT</span>(pta.post_id) = <span class="integer">2</span>; <span class="comment"># subset</span></pre></div>
+</div>
+
+
+<p>vs. the new array columns…</p>
+
+<div class="CodeRay">
+  <div class="code"><pre><span class="class">SELECT</span> posts.* <span class="keyword">FROM</span> posts <span class="keyword">WHERE</span> ARRAY[<span class="string"><span class="delimiter">'</span><span class="content">chunky</span><span class="delimiter">'</span></span>, <span class="string"><span class="delimiter">'</span><span class="content">bacon</span><span class="delimiter">'</span></span>] &amp;&amp; tags; <span class="comment"># overlap</span>
+<span class="class">SELECT</span> posts.* <span class="keyword">FROM</span> posts <span class="keyword">WHERE</span> ARRAY[<span class="string"><span class="delimiter">'</span><span class="content">chunky</span><span class="delimiter">'</span></span>, <span class="string"><span class="delimiter">'</span><span class="content">bacon</span><span class="delimiter">'</span></span>] &lt;<span class="error">@</span> tags; <span class="comment"># subset</span></pre></div>
+</div>
+
+
+<p>Not only is this easier on the developer but it’s going to be a bit
+faster since you’re not joining three tables together.</p>
+
+<h2>Optimizing with GiN indexes</h2>
+
+<p>At this point there’s a fully functioning table which you can query
+and it’s probably a little bit quicker than original many-to-many
+method. However, we can make it <em>much</em> faster by indexing the new tags
+array. The standard postgres index types (bitmap, hash, etc.) don’t
+work with arrays but fortunately there’s the oft overlooked <a href="http://www.postgresql.org/docs/8.4/static/textsearch-indexes.html">GiN
+index</a>
+which can make these queries really fly. Before adding the index let’s
+take a look at what’s going on behind the scenes when we run one of
+the above queries. I’m using the filtering table from filmlust for
+this since postgres won’t use the indexes without a significant amount
+of data in there.</p>
+
+<div class="CodeRay">
+  <div class="code"><pre>mydb=&gt; explain analyze <span class="class">select</span> id <span class="keyword">from</span> films_test <span class="keyword">WHERE</span> <span class="string"><span class="delimiter">'</span><span class="content">action</span><span class="delimiter">'</span></span> = <span class="keyword">ANY</span>(tag);
+                                                  QUERY PLAN
+<span class="comment">---------------------------------------------------------------------------------------------------------------</span>
+ Seq Scan <span class="keyword">on</span> films_test  (cost=<span class="float">0.00</span>.<span class="float">.6666</span><span class="float">.27</span> rows=<span class="integer">8507</span> width=<span class="integer">4</span>) (actual <span class="predefined-type">time</span>=<span class="float">0.034</span>.<span class="float">.61</span><span class="float">.595</span> rows=<span class="integer">14767</span> loops=<span class="integer">1</span>)
+   Filter: (<span class="string"><span class="delimiter">'</span><span class="content">action</span><span class="delimiter">'</span></span>::<span class="predefined-type">text</span> = <span class="keyword">ANY</span> (tag))
+ Total runtime: <span class="float">62.396</span> ms
+(<span class="integer">3</span> rows)
+
+mydb=&gt; explain analyze <span class="class">select</span> id <span class="keyword">from</span> films_test <span class="keyword">WHERE</span> ARRAY[<span class="string"><span class="delimiter">'</span><span class="content">action</span><span class="delimiter">'</span></span>,<span class="string"><span class="delimiter">'</span><span class="content">adventure</span><span class="delimiter">'</span></span>] &lt;<span class="error">@</span> tag;
+                                                 QUERY PLAN
+<span class="comment">-------------------------------------------------------------------------------------------------------------</span>
+ Seq Scan <span class="keyword">on</span> films_test  (cost=<span class="float">0.00</span>.<span class="float">.4926</span><span class="float">.15</span> rows=<span class="integer">174</span> width=<span class="integer">4</span>) (actual <span class="predefined-type">time</span>=<span class="float">0.123</span>.<span class="float">.75</span><span class="float">.030</span> rows=<span class="integer">3340</span> loops=<span class="integer">1</span>)
+   Filter: (<span class="string"><span class="delimiter">'</span><span class="content">{action,adventure}</span><span class="delimiter">'</span></span>::<span class="predefined-type">text</span>[] &lt;<span class="error">@</span> tag)
+ Total runtime: <span class="float">75.269</span> ms
+(<span class="integer">3</span> rows)</pre></div>
+</div>
+
+
+<p>So it’s doing a normal sequential scan and doing row-by-row
+comparisons. Now, to add the GiN index:</p>
+
+<div class="CodeRay">
+  <div class="code"><pre><span class="class">CREATE</span> <span class="type">INDEX</span> ix_posts_tags <span class="keyword">ON</span> <span class="string"><span class="delimiter">"</span><span class="content">posts</span><span class="delimiter">"</span></span> <span class="keyword">USING</span> GIN (<span class="string"><span class="delimiter">"</span><span class="content">tags</span><span class="delimiter">"</span></span>);</pre></div>
+</div>
+
+
+<p>And running the queries again we get:</p>
+
+<div class="CodeRay">
+  <div class="code"><pre>mydb=&gt; explain analyze <span class="class">select</span> id <span class="keyword">from</span> films_test <span class="keyword">WHERE</span> <span class="string"><span class="delimiter">'</span><span class="content">action</span><span class="delimiter">'</span></span> = <span class="keyword">ANY</span>(tag);
+                                                  QUERY PLAN
+<span class="comment">---------------------------------------------------------------------------------------------------------------</span>
+ Seq Scan <span class="keyword">on</span> films_test  (cost=<span class="float">0.00</span>.<span class="float">.6666</span><span class="float">.27</span> rows=<span class="integer">8507</span> width=<span class="integer">4</span>) (actual <span class="predefined-type">time</span>=<span class="float">0.035</span>.<span class="float">.61</span><span class="float">.593</span> rows=<span class="integer">14767</span> loops=<span class="integer">1</span>)
+   Filter: (<span class="string"><span class="delimiter">'</span><span class="content">action</span><span class="delimiter">'</span></span>::<span class="predefined-type">text</span> = <span class="keyword">ANY</span> (tag))
+ Total runtime: <span class="float">62.343</span> ms
+(<span class="integer">3</span> rows)</pre></div>
+</div>
+
+
+<p>So that first query remained the same because the index isn’t used
+when using the ANY function. The GiN index only kicks in with the
+operators <a href="http://www.postgresql.org/docs/8.4/static/indexes-types.html">shown here</a>.
+Trying it again with the overlap operator:</p>
+
+<div class="CodeRay">
+  <div class="code"><pre>mydb=&gt; explain analyze <span class="class">select</span> id <span class="keyword">from</span> films_test <span class="keyword">WHERE</span> ARRAY[<span class="string"><span class="delimiter">'</span><span class="content">action</span><span class="delimiter">'</span></span>] &amp;&amp; tag;
+                                                            QUERY PLAN
+<span class="comment">----------------------------------------------------------------------------------------------------------------------------------</span>
+ Bitmap Heap Scan <span class="keyword">on</span> films_test  (cost=<span class="float">4.83</span>.<span class="float">.557</span><span class="float">.34</span> rows=<span class="integer">174</span> width=<span class="integer">4</span>) (actual <span class="predefined-type">time</span>=<span class="float">2.926</span>.<span class="float">.8</span><span class="float">.755</span> rows=<span class="integer">14767</span> loops=<span class="integer">1</span>)
+   Recheck Cond: (<span class="string"><span class="delimiter">'</span><span class="content">{action}</span><span class="delimiter">'</span></span>::<span class="predefined-type">text</span>[] &lt;<span class="error">@</span> tag)
+   -&gt;  Bitmap <span class="type">Index</span> Scan <span class="keyword">on</span> ix_films_test  (cost=<span class="float">0.00</span>.<span class="float">.4</span><span class="float">.78</span> rows=<span class="integer">174</span> width=<span class="integer">0</span>) (actual <span class="predefined-type">time</span>=<span class="float">2.533</span>.<span class="float">.2</span><span class="float">.533</span> rows=<span class="integer">14767</span> loops=<span class="integer">1</span>)
+         <span class="type">Index</span> Cond: (<span class="string"><span class="delimiter">'</span><span class="content">{action}</span><span class="delimiter">'</span></span>::<span class="predefined-type">text</span>[] &lt;<span class="error">@</span> tag)
+ Total runtime: <span class="float">9.461</span> ms
+(<span class="integer">5</span> rows)
+
+mydb=&gt; explain analyze <span class="class">select</span> id <span class="keyword">from</span> films_test <span class="keyword">WHERE</span> ARRAY[<span class="string"><span class="delimiter">'</span><span class="content">action</span><span class="delimiter">'</span></span>,<span class="string"><span class="delimiter">'</span><span class="content">adventure</span><span class="delimiter">'</span></span>] &lt;<span class="error">@</span> tag;
+                                                           QUERY PLAN
+<span class="comment">---------------------------------------------------------------------------------------------------------------------------------</span>
+ Bitmap Heap Scan <span class="keyword">on</span> films_test  (cost=<span class="float">4.83</span>.<span class="float">.557</span><span class="float">.34</span> rows=<span class="integer">174</span> width=<span class="integer">4</span>) (actual <span class="predefined-type">time</span>=<span class="float">2.761</span>.<span class="float">.5</span><span class="float">.229</span> rows=<span class="integer">3340</span> loops=<span class="integer">1</span>)
+   Recheck Cond: (<span class="string"><span class="delimiter">'</span><span class="content">{action,adventure}</span><span class="delimiter">'</span></span>::<span class="predefined-type">text</span>[] &lt;<span class="error">@</span> tag)
+   -&gt;  Bitmap <span class="type">Index</span> Scan <span class="keyword">on</span> ix_films_test  (cost=<span class="float">0.00</span>.<span class="float">.4</span><span class="float">.78</span> rows=<span class="integer">174</span> width=<span class="integer">0</span>) (actual <span class="predefined-type">time</span>=<span class="float">2.517</span>.<span class="float">.2</span><span class="float">.517</span> rows=<span class="integer">3340</span> loops=<span class="integer">1</span>)
+         <span class="type">Index</span> Cond: (<span class="string"><span class="delimiter">'</span><span class="content">{action,adventure}</span><span class="delimiter">'</span></span>::<span class="predefined-type">text</span>[] &lt;<span class="error">@</span> tag)
+ Total runtime: <span class="float">5.427</span> ms
+(<span class="integer">5</span> rows)</pre></div>
+</div>
+
+
+<p>Now we’re cooking with grease! A solid order of magnitude performance
+increase when using the proper index and corresponding operators.</p>
+
+<h2>Notes</h2>
+
+<h3>Disadvantages</h3>
+
+<p>One downside is the management of the tags themselves. It can become
+more tenuous to do some operations such as changing the name of the
+tag. Whereas in a normalized schema you just change one column in one
+row of the tags table you now need to search through the entire posts
+table and update all the tags arrays.  There also could be some issues
+maintaining consistency since you don’t really have one list of tags
+anymore. It’s not to difficult with data like mine on filmlust, where
+all the tags are known beforehand, but it becomes hairy once you have
+users inserting/updating all sorts of things on something like
+delicious. One possibility for amelioration here would be to still
+carry that separate tags table but cut out the middleman and put the
+tag_ids directly into the tags array in the posts table.</p>
+
+<h3>Size</h3>
+
+<p>Usually when denormalizing a schema you face the prospect of growing
+the physical size of your db exponentially due to all the newly
+redundant data.  For something as small as a tag this isn’t really the
+case.  Before there was an association table which had a post_id and a
+tag_id for every tag/post combo so we’re only adding the difference of
+the average tag length (~10 chars = 10 bytes) and the two id integers
+(~2 * 4 = 8 bytes) (ignoring the table overhead and the entire
+separate tags table).  A paltry 2 bytes, so I don’t think this is much
+of an issue here since the content itself is going to be much much
+larger.</p>

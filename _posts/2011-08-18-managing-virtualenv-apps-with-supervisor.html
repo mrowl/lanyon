@@ -1,0 +1,53 @@
+---
+layout: post
+title: Managing virtualenv apps with Supervisor
+date: '2011-08-18T12:57:00-04:00'
+tags:
+- JustMigrated
+- supervisor
+- virtualenv
+tumblr_url: http://sortedaffairs.tumblr.com/post/49113594655/managing-virtualenv-apps-with-supervisor
+---
+<p>I’ve been using <a href="http://supervisord.org">supervisor</a> a lot to manage my server processes and I’ve grown quite fond of it but it can make things a bit tricky when running apps contained in a virtualenv sandbox.  There are a couple workarounds: setting all the environment variables that virtualenv exports in its bin/activate script or using a bash script to launch the app from within the virtual environment. I chose the latter route because it’s pretty simple and it can be convenient to have the script around for other tasks.  The script, which I place in a my_app/script folder, follows.</p>
+
+<p><a href="https://gist.github.com/1153271">https://gist.github.com/1153271</a></p>
+
+<p>And in the supervisor conf file:</p>
+
+<div class="CodeRay">
+  <div class="code"><pre>[program:my_app_0]
+user=my_user
+autostart=true
+autorestart=true
+command=/home/my_user/my_env/my_app/script/env_run.sh python main.py -p 8880
+
+[program:my_app_1]
+user=my_user
+autostart=true
+autorestart=true
+command=/home/my_user/my_env/my_app/script/env_run.sh python main.py -p 8881</pre></div>
+</div>
+
+
+<p>In the last line of the script using exec to start the program is somewhat important because it replaces the bash script’s process with the python process, thus giving supervisor control of the app itself instead of the bash script. You can check the process ids to verify. Here’s a quick test I ran on my local box.</p>
+
+<div class="CodeRay">
+  <div class="code"><pre># Running without exec (don't actually daemonize (the "&amp;") with supervisor)
+scott@c ~ $ /home/scott/webdev/my_env/my_app/script/env_run.sh python main.py -p 8888 &amp;
+[1] 5152
+scott@c ~ $ ps -ef | grep main.py
+scott     5152  4642  0 12:30 pts/19   00:00:00 /bin/bash /home/scott/webdev/my_env/my_app/script/env_run.sh python main.py -p 8888
+scott     5161  5152 15 12:30 pts/19   00:00:00 python main.py -p 8888
+#
+#
+# Running with exec...
+scott@c ~ $ /home/scott/webdev/my_env/my_app/script/env_run.sh python main.py -p 8888 &amp;
+[1] 3740
+scott@c ~ $ ps -ef | grep main.py
+scott     3740 27015  7 12:24 pts/9    00:00:00 python main.py -p 8888</pre></div>
+</div>
+
+
+<p>No more bash middleman!</p>
+
+<p>Note: the above examples were done for a <a href="http://www.tornadoweb.org">tornado</a> deployment.</p>

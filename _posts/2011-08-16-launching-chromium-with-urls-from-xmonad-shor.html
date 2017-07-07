@@ -1,0 +1,24 @@
+---
+layout: post
+title: Launching chromium from xmonad prompt shortcuts
+date: '2011-08-16T21:50:00-04:00'
+tags:
+- JustMigrated
+- chromium
+- xmonad
+tumblr_url: http://sortedaffairs.tumblr.com/post/49113595673/launching-chromium-with-urls-from-xmonad-shor
+---
+<p>For some unknown reason chromium seems only to accept UTF-8 encoded urls for its cli arguments.  This conflicts with xmonad which pipes ISO-8859 text when it spawns processes via shortcuts (e.g. the <code>XMonad.Actions.Search</code> module).  To get around this you can point the default browser (xmonad uses the <code>$BROWSER</code> env variable in bash) to a script which uses the unix <code>iconv</code> program to sanitize xmonad’s text for chromium input and then launches chromium with the purified url.  It also logs all the xmonad-spawned searches to a file for my future amusement.</p>
+
+<p>In .bashrc:</p>
+
+<div class="CodeRay">
+  <div class="code"><pre>export BROWSER="${HOME}/.chromium_opener.sh"</pre></div>
+</div>
+
+
+<p>And .chromium_opener.sh…</p>
+
+<p><a href="https://gist.github.com/1150624">https://gist.github.com/1150624</a></p>
+
+<p>Voila!</p>

@@ -1,0 +1,17 @@
+---
+layout: post
+title: Aggressively caching CSS media with Sass and Tornado
+date: '2011-09-02T16:22:00-04:00'
+tags:
+- JustMigrated
+- cache
+- css
+- sass
+- tornado
+tumblr_url: http://sortedaffairs.tumblr.com/post/49113592619/aggressively-caching-css-media-with-sass-and
+---
+<p>Tornado comes with a nice <a href="http://www.tornadoweb.org/documentation/web.html#tornado.web.RequestHandler.static_url">static url feature</a> for including static files in your templates. It appends hashes to those urls and turns on really aggressive file caching, since the hash bearing url of the requested static file will change whenever the file itself changes, thus busting any browser caching.  Unfortunately there’s no inherent means of dealing with the urls in the css (or scss as the case may be) files (e.g. png icons).</p>
+
+<p>To solve this there are a few (probably more) options that I thought of: regex replacements before deployment, making the css files into a tornado template and processing them, adding a hook to sass, or adding the same static_url method to Sass’s arsenal using <a href="http://sass-lang.com/docs/yardoc/Sass/Script/Functions.html#adding_custom_functions">custom functions</a>.  I opted for the last method and added the following to <code>config.rb</code> in order to extend Sass and add a new <code>static_url</code> function for .scss files.</p>
+
+<p><a href="https://gist.github.com/1189785">https://gist.github.com/1189785</a></p>

@@ -1,0 +1,25 @@
+---
+layout: post
+title: Dynamically adding methods to a Rails model
+date: '2011-01-24T13:24:36-05:00'
+tags:
+- JustMigrated
+- cancan
+- rails
+- ruby
+tumblr_url: http://sortedaffairs.tumblr.com/post/49113600546/40821094
+---
+<p>I’ve been using <a href="https://github.com/ryanb/cancan">CanCan</a> for implementing role-based access in my rails app and it’s been great so far.  I had created a separate convenience method in the User model for testing each possible user role, e.g.</p>
+
+<div class="CodeRay">
+  <div class="code"><pre><span class="keyword">def</span> <span class="function">admin?</span>
+  <span class="predefined-constant">self</span>.role == <span class="string"><span class="delimiter">'</span><span class="content">admin</span><span class="delimiter">'</span></span>
+<span class="keyword">end</span></pre></div>
+</div>
+
+
+<p>This was great and allowed me to do a simple <code>user.admin?</code> to test for role membership.  After changing my roles around a few times I wanted a way to avoid the tedium of creating/editing those methods.  I began experimenting with Ruby’s powerful class manipulation abilities and came up with this:</p>
+
+<p><a href="https://gist.github.com/793616">https://gist.github.com/793616</a></p>
+
+<p>It dynamically adds all those methods based on a simple list of possible roles.  I’ve only been using Ruby for a short while and the ease with which I was able to accomplish such a feat was pretty impressive.  Score one for Ruby.</p>

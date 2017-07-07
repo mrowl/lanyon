@@ -1,0 +1,27 @@
+---
+layout: post
+title: Using Google's Closure Compiler in Phing
+date: '2011-09-19T17:46:00-04:00'
+tags:
+- JustMigrated
+- closure
+- javascript
+- phing
+- php
+tumblr_url: http://sortedaffairs.tumblr.com/post/49113588776/using-googles-closure-compiler-in-phing
+---
+<p><a href="http://www.phing.info/trac/">Phing</a> is a build tool for automating and managing php deployments. One great feature is the ability to <a href="http://www.phing.info/docs/guide/stable/chapters/appendixes/AppendixC-OptionalTasks.html#JsMinTask">minify your .js files</a> during the build process.  Unfortunately Phing uses jsmin to accomplish this instead of the newer, more efficient compilers like <a href="http://code.google.com/closure/compiler/">Google’s Closure Compiler</a>.</p>
+
+<p>To add minifying via Closure I created <a href="https://github.com/mrowl/phing-tasks/blob/master/tasks/my/JsCompileTask.php">this Phing task</a>. The API is very similar to that of jsmin, e.g.</p>
+
+<div class="CodeRay">
+  <div class="code"><pre><span class="tag">&lt;taskdef</span> <span class="attribute-name">name</span>=<span class="string"><span class="delimiter">"</span><span class="content">jsCompile</span><span class="delimiter">"</span></span> <span class="attribute-name">classname</span>=<span class="string"><span class="delimiter">"</span><span class="content">phing.tasks.my.JsCompileTask</span><span class="delimiter">"</span></span> <span class="tag">/&gt;</span>
+<span class="tag">&lt;jsCompile</span> <span class="attribute-name">compilerPath</span>=<span class="string"><span class="delimiter">"</span><span class="content">docroot/bin/compiler.jar</span><span class="delimiter">"</span></span> <span class="attribute-name">targetPath</span>=<span class="string"><span class="delimiter">"</span><span class="content">docroot/script/minified</span><span class="delimiter">"</span></span> <span class="attribute-name">failOnError</span>=<span class="string"><span class="delimiter">"</span><span class="content">false</span><span class="delimiter">"</span></span><span class="tag">&gt;</span>
+    <span class="tag">&lt;fileset</span> <span class="attribute-name">dir</span>=<span class="string"><span class="delimiter">"</span><span class="content">docroot/script</span><span class="delimiter">"</span></span><span class="tag">&gt;</span>
+        <span class="tag">&lt;include</span> <span class="attribute-name">name</span>=<span class="string"><span class="delimiter">"</span><span class="content">**/*.js</span><span class="delimiter">"</span></span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;/fileset&gt;</span>
+<span class="tag">&lt;/jsCompile&gt;</span></pre></div>
+</div>
+
+
+<p>Happy Phinging!</p>

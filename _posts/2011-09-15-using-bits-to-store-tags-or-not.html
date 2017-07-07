@@ -1,0 +1,117 @@
+---
+layout: post
+title: Using bits to store tags, or perhaps not
+date: '2011-09-15T12:35:00-04:00'
+tags:
+- JustMigrated
+tumblr_url: http://sortedaffairs.tumblr.com/post/49113590497/using-bits-to-store-tags-or-not
+---
+<p>In a <a href="http://sjsnyder.com/using-postgresql-arrays-with-gin-indexes-for">previous post</a> I looked at using PostgreSQL arrays w/ GiN indexes to store tags for quick subset and overlap matching. I noticed soon after implementing this on <a href="http://filmlust.com/title/">filmlust</a> (for the film genres) that some queries were taking longer than they should have. Namely, queries with a genre filter in conjunction with a highly selective filter, such as a high minimum vote count.</p>
+
+<p>So, I had a look at a query plan (note: I map the genres to integers for a smaller footprint, so this is actually looking for all of “action”, “adventure”, “classic”):</p>
+
+<div class="CodeRay">
+  <div class="code"><pre>filmlust=&gt; explain analyze <span class="class">select</span> id <span class="keyword">from</span> title <span class="keyword">WHERE</span> imdb_count &gt;= <span class="integer">5000</span> <span class="keyword">AND</span> genre <span class="error">@</span>&gt; <span class="string"><span class="delimiter">'</span><span class="content">{6,7,19}</span><span class="delimiter">'</span></span>;
+                                                               QUERY PLAN                                                                
+<span class="comment">-----------------------------------------------------------------------------------------------------------------------------------------</span>
+ Bitmap Heap Scan <span class="keyword">on</span> title  (cost=<span class="float">101.26</span>.<span class="float">.120</span><span class="float">.59</span> rows=<span class="integer">5</span> width=<span class="integer">4</span>) (actual <span class="predefined-type">time</span>=<span class="float">4.533</span>.<span class="float">.4</span><span class="float">.593</span> rows=<span class="integer">55</span> loops=<span class="integer">1</span>)
+   Recheck Cond: ((genre <span class="error">@</span>&gt; <span class="string"><span class="delimiter">'</span><span class="content">{6,7,19}</span><span class="delimiter">'</span></span>::<span class="predefined-type">smallint</span>[]) <span class="keyword">AND</span> (imdb_count &gt;= <span class="integer">5000</span>))
+   -&gt;  BitmapAnd  (cost=<span class="float">101.26</span>.<span class="float">.101</span><span class="float">.26</span> rows=<span class="integer">5</span> width=<span class="integer">0</span>) (actual <span class="predefined-type">time</span>=<span class="float">4.522</span>.<span class="float">.4</span><span class="float">.522</span> rows=<span class="integer">0</span> loops=<span class="integer">1</span>)
+         -&gt;  Bitmap <span class="type">Index</span> Scan <span class="keyword">on</span> ix_title_genre  (cost=<span class="float">0.00</span>.<span class="float">.8</span><span class="float">.82</span> rows=<span class="integer">175</span> width=<span class="integer">0</span>) (actual <span class="predefined-type">time</span>=<span class="float">3.922</span>.<span class="float">.3</span><span class="float">.922</span> rows=<span class="integer">372</span> loops=<span class="integer">1</span>)
+               <span class="type">Index</span> Cond: (genre <span class="error">@</span>&gt; <span class="string"><span class="delimiter">'</span><span class="content">{6,7,19}</span><span class="delimiter">'</span></span>::<span class="predefined-type">smallint</span>[])
+         -&gt;  Bitmap <span class="type">Index</span> Scan <span class="keyword">on</span> ix_title_imdb_count  (cost=<span class="float">0.00</span>.<span class="float">.92</span><span class="float">.19</span> rows=<span class="integer">5305</span> width=<span class="integer">0</span>) (actual <span class="predefined-type">time</span>=<span class="float">0.563</span>.<span class="float">.0</span><span class="float">.563</span> rows=<span class="integer">5296</span> loops=<span class="integer">1</span>)
+               <span class="type">Index</span> Cond: (imdb_count &gt;= <span class="integer">5000</span>)
+ Total runtime: <span class="float">4.620</span> ms</pre></div>
+</div>
+
+
+<p>And there’s the crux of the issue. In a perfect world it would perform the one scan on the imdb_count index, which is faster than the genre GiN index, and then scan the few remaining rows (5296 here) for genre matches. I could make this happen with a <a href="http://www.postgresql.org/docs/9.0/static/indexes-multicolumn.html">multicolumn index</a>, but because of the large variety of filters I have it’s not a viable option as there would be too many permutations. Thus, Postgres is forced to do two separate index scans on queries like this (see <a href="http://www.postgresql.org/docs/9.0/static/indexes-bitmap-scans.html">“combining multiple indexes”</a>).</p>
+
+<h2>Drop the index? Surely you jest.</h2>
+
+<p>One way to get around this is to drop the genre index, so Postgres would first do the index scan on the fast, selective, imdb_count condition, and then filter those rows.</p>
+
+<div class="CodeRay">
+  <div class="code"><pre>filmlust=&gt; <span class="class">drop</span> <span class="type">index</span> ix_title_genre;
+<span class="class">DROP</span> <span class="type">INDEX</span>
+filmlust=&gt; explain analyze <span class="class">select</span> id <span class="keyword">from</span> title <span class="keyword">WHERE</span> imdb_count &gt;= <span class="integer">5000</span> <span class="keyword">AND</span> genre <span class="error">@</span>&gt; <span class="string"><span class="delimiter">'</span><span class="content">{6,7,19}</span><span class="delimiter">'</span></span>;
+                                                            QUERY PLAN                                                             
+<span class="comment">-----------------------------------------------------------------------------------------------------------------------------------</span>
+ Bitmap Heap Scan <span class="keyword">on</span> title  (cost=<span class="float">92.19</span>.<span class="float">.2169</span><span class="float">.77</span> rows=<span class="integer">5</span> width=<span class="integer">4</span>) (actual <span class="predefined-type">time</span>=<span class="float">0.838</span>.<span class="float">.5</span><span class="float">.229</span> rows=<span class="integer">55</span> loops=<span class="integer">1</span>)
+   Recheck Cond: (imdb_count &gt;= <span class="integer">5000</span>)
+   Filter: (genre <span class="error">@</span>&gt; <span class="string"><span class="delimiter">'</span><span class="content">{6,7,19}</span><span class="delimiter">'</span></span>::<span class="predefined-type">smallint</span>[])
+   -&gt;  Bitmap <span class="type">Index</span> Scan <span class="keyword">on</span> ix_title_imdb_count  (cost=<span class="float">0.00</span>.<span class="float">.92</span><span class="float">.19</span> rows=<span class="integer">5305</span> width=<span class="integer">0</span>) (actual <span class="predefined-type">time</span>=<span class="float">0.569</span>.<span class="float">.0</span><span class="float">.569</span> rows=<span class="integer">5296</span> loops=<span class="integer">1</span>)
+         <span class="type">Index</span> Cond: (imdb_count &gt;= <span class="integer">5000</span>)
+ Total runtime: <span class="float">5.253</span> ms</pre></div>
+</div>
+
+
+<p>Unfortunately that wasn’t any faster because the comparisons, as few as there may be, are too expensive. Perhaps there’s another way of storing genres to speed up the “Filter” step in the above query process.</p>
+
+<h2>Enter the bits</h2>
+
+<p>If we pack the genres into a <a href="http://www.postgresql.org/docs/8.4/static/datatype-bit.html">bit string</a> we can compare them very quickly with <a href="http://www.postgresql.org/docs/8.4/static/functions-math.html">bitwise operations</a> while still maintaining the small memory size I crave.  Adding a mere bit for each of the 24 genres to every row. To implement this technique we’ll first need to map all the genres to a position in the bit string. The one I use for filmlust is at the bottom of <a href="https://github.com/mrowl/filmdata/blob/master/filmdata/__init__.py">this file</a> (coincidentally this is how I do the integer mapping I noted above). So the bit at the 4th least significant position (2<sup>3)</sup> would be on if the film contained the “foreign” genre.</p>
+
+<h2>Querying for all genres</h2>
+
+<p>Here’s the results for returning the same rows as the two examples above:</p>
+
+<div class="CodeRay">
+  <div class="code"><pre>filmlust=&gt; explain analyze <span class="class">select</span> id <span class="keyword">from</span> title_bit <span class="keyword">WHERE</span> imdb_count &gt;= <span class="integer">5000</span> <span class="keyword">AND</span> genre &amp; <span class="string"><span class="modifier">B</span><span class="delimiter">'</span><span class="content">000010000000000011000000</span><span class="delimiter">'</span></span> = <span class="string"><span class="modifier">B</span><span class="delimiter">'</span><span class="content">000010000000000011000000</span><span class="delimiter">'</span></span>;
+                                                              QUERY PLAN                                                               
+<span class="comment">---------------------------------------------------------------------------------------------------------------------------------------</span>
+ Bitmap Heap Scan <span class="keyword">on</span> title_bit  (cost=<span class="float">96.97</span>.<span class="float">.1794</span><span class="float">.30</span> rows=<span class="integer">28</span> width=<span class="integer">4</span>) (actual <span class="predefined-type">time</span>=<span class="float">0.771</span>.<span class="float">.4</span><span class="float">.572</span> rows=<span class="integer">55</span> loops=<span class="integer">1</span>)
+   Recheck Cond: (imdb_count &gt;= <span class="integer">5000</span>)
+   Filter: ((genre &amp; <span class="string"><span class="modifier">B</span><span class="delimiter">'</span><span class="content">000010000000000011000000</span><span class="delimiter">'</span></span>::<span class="string"><span class="delimiter">"</span><span class="content">bit</span><span class="delimiter">"</span></span>) = <span class="string"><span class="modifier">B</span><span class="delimiter">'</span><span class="content">000010000000000011000000</span><span class="delimiter">'</span></span>::<span class="string"><span class="delimiter">"</span><span class="content">bit</span><span class="delimiter">"</span></span>)
+   -&gt;  Bitmap <span class="type">Index</span> Scan <span class="keyword">on</span> ix_title_bit_imdb_count  (cost=<span class="float">0.00</span>.<span class="float">.96</span><span class="float">.96</span> rows=<span class="integer">5562</span> width=<span class="integer">0</span>) (actual <span class="predefined-type">time</span>=<span class="float">0.554</span>.<span class="float">.0</span><span class="float">.554</span> rows=<span class="integer">5296</span> loops=<span class="integer">1</span>)
+         <span class="type">Index</span> Cond: (imdb_count &gt;= <span class="integer">5000</span>)
+ Total runtime: <span class="float">4.602</span> ms</pre></div>
+</div>
+
+
+<p>Huzzah! It cut the time by a whole .018ms. Well, that wasn’t the huge gain I was looking for, but I figured it warranted further investigation.</p>
+
+<h2>Benchmarks</h2>
+
+<p>The following benchmarks were run with my production code, so it includes the limits for pages and a second query to obtain the row count. The first column describes the conditions: small cull = a not very selective condition (leaves about 1/3), large cull = a selective condition (the imdb_count condition above, leaves only 1/30 of the rows). The second and third columns are the time it took to execute using the array and bit string types, respectively. The fourth column is the difference (array – bits).</p>
+
+<div class="CodeRay">
+  <div class="code"><pre>                              Arrays      Bits        Diff
+all 1 genre                   0.01839     0.06916     -0.05077
+all 3 genres                  0.00949     0.06374     -0.05425
+any 3 genres                  0.02175     0.06315     -0.04140
+all 1 genre, small cull       0.00969     0.04161     -0.03192
+all 3 genres, small cull      0.00982     0.04101     -0.03119
+any 3 genres, small cull      0.01587     0.02574     -0.00987
+all 1 genre, large cull       0.01072     0.00770     0.00303
+all 3 genres, large cull      0.01053     0.00713     0.00339
+any 3 genres, large cull      0.01759     0.00604     0.01155</pre></div>
+</div>
+
+
+<p>There’s  a definite performance advantage to using the bit strings with the more selective conditions, about 1.5x for matching any genre and 3x for matching all, but they’re a bit slower when flying solo or combined with a condition that doesn’t cut the data down very much.</p>
+
+<h2>Matching any genre</h2>
+
+<p>For posterity here’s how to match an overlap of genres (i.e. the film contains any of “action”, “adventure”, “classic”):</p>
+
+<div class="CodeRay">
+  <div class="code"><pre>filmlust=&gt; explain analyze <span class="class">select</span> id <span class="keyword">from</span> title_bit <span class="keyword">WHERE</span> imdb_count &gt;= <span class="integer">5000</span> <span class="keyword">AND</span> genre &amp; <span class="string"><span class="modifier">B</span><span class="delimiter">'</span><span class="content">000010000000000011000000</span><span class="delimiter">'</span></span> != <span class="string"><span class="modifier">B</span><span class="delimiter">'</span><span class="content">000000000000000000000000</span><span class="delimiter">'</span></span>;
+                                                              QUERY PLAN                                                               
+<span class="comment">---------------------------------------------------------------------------------------------------------------------------------------</span>
+ Bitmap Heap Scan <span class="keyword">on</span> title_bit  (cost=<span class="float">98.34</span>.<span class="float">.1795</span><span class="float">.68</span> rows=<span class="integer">5534</span> width=<span class="integer">4</span>) (actual <span class="predefined-type">time</span>=<span class="float">0.758</span>.<span class="float">.4</span><span class="float">.767</span> rows=<span class="integer">2228</span> loops=<span class="integer">1</span>)
+   Recheck Cond: (imdb_count &gt;= <span class="integer">5000</span>)
+   Filter: ((genre &amp; <span class="string"><span class="modifier">B</span><span class="delimiter">'</span><span class="content">000010000000000011000000</span><span class="delimiter">'</span></span>::<span class="string"><span class="delimiter">"</span><span class="content">bit</span><span class="delimiter">"</span></span>) &lt;&gt; <span class="string"><span class="modifier">B</span><span class="delimiter">'</span><span class="content">000000000000000000000000</span><span class="delimiter">'</span></span>::<span class="string"><span class="delimiter">"</span><span class="content">bit</span><span class="delimiter">"</span></span>)
+   -&gt;  Bitmap <span class="type">Index</span> Scan <span class="keyword">on</span> ix_title_bit_imdb_count  (cost=<span class="float">0.00</span>.<span class="float">.96</span><span class="float">.96</span> rows=<span class="integer">5562</span> width=<span class="integer">0</span>) (actual <span class="predefined-type">time</span>=<span class="float">0.548</span>.<span class="float">.0</span><span class="float">.548</span> rows=<span class="integer">5296</span> loops=<span class="integer">1</span>)
+         <span class="type">Index</span> Cond: (imdb_count &gt;= <span class="integer">5000</span>)
+ Total runtime: <span class="float">4.903</span> ms</pre></div>
+</div>
+
+
+<h2>Conclusion</h2>
+
+<p>You can eke out a little more performance using bit strings for tags/genres depending on the other conditions in your typical query. If they’re highly selective, use bit strings, otherwise you’ll probably be better off with the array data type. I’m sticking with the arrays for now because they are somewhat easier to work with and the queries are still a bit faster in many of my use cases. I’ve started logging user interaction to get a handle on which filters are most popular so I may switch over to bit strings in the future if necessary.</p>
+
+<p>One caveat: a major potential shortcoming of the bit string method is the size.  With my data I only have 24 possible genres yielding 24 bits per row. There is an average of 4 genres per film which would yield an array size of ~64 bits (4 smallints) per row. So the bit strings are nearly a third of the size.  However, if you implemented this with 1000 possible genres the arrays would probably be the lighter option because you would need that massive 1000 bit column to hold the bit string for each row.</p>
+
+<p>Thus, as usual, there’s no “one size fits all” solution, so pick your poison carefully.</p>
