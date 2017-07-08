@@ -6,7 +6,7 @@ tags:
 - JustMigrated
 tumblr_url: http://sortedaffairs.tumblr.com/post/49113590497/using-bits-to-store-tags-or-not
 ---
-<p>In a <a href="http://sjsnyder.com/using-postgresql-arrays-with-gin-indexes-for">previous post</a> I looked at using PostgreSQL arrays w/ GiN indexes to store tags for quick subset and overlap matching. I noticed soon after implementing this on <a href="http://filmlust.com/title/">filmlust</a> (for the film genres) that some queries were taking longer than they should have. Namely, queries with a genre filter in conjunction with a highly selective filter, such as a high minimum vote count.</p>
+<p>In a <a href="http://nonplus.me//2011/08/16/using-postgresql-arrays-with-gin-indexes-for/">previous post</a> I looked at using PostgreSQL arrays w/ GiN indexes to store tags for quick subset and overlap matching. I noticed soon after implementing this on <a href="http://filmlust.com/title/">filmlust</a> (for the film genres) that some queries were taking longer than they should have. Namely, queries with a genre filter in conjunction with a highly selective filter, such as a high minimum vote count.</p>
 
 <p>So, I had a look at a query plan (note: I map the genres to integers for a smaller footprint, so this is actually looking for all of “action”, “adventure”, “classic”):</p>
 
