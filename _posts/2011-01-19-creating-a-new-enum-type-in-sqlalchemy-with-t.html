@@ -13,7 +13,7 @@ tumblr_url: http://sortedaffairs.tumblr.com/post/49113601454/creating-a-new-enum
 
 <p>I settled on storage using a small integer due to its small footprint while still allowing a large bucket of values. I was initially planning on using the integers in the code and trying to remember what each integer represented but my feeble mind wasn’t up for the challenge. So I found the <a href="http://www.sqlalchemy.org/docs/core/types.html#custom-types">SQLAlchemy TypeDecorator</a> class which makes it dead simple to create a custom column type:</p>
 
-<p><a href="https://gist.github.com/786501">https://gist.github.com/786501</a></p>
+<p><script src="https://gist.github.com/mrowl/786501.js"></script></p>
 
 <p>Using the new type is very similar to the generic EnumType:</p>
 

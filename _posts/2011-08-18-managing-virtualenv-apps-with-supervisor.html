@@ -10,7 +10,7 @@ tumblr_url: http://sortedaffairs.tumblr.com/post/49113594655/managing-virtualenv
 ---
 <p>I’ve been using <a href="http://supervisord.org">supervisor</a> a lot to manage my server processes and I’ve grown quite fond of it but it can make things a bit tricky when running apps contained in a virtualenv sandbox.  There are a couple workarounds: setting all the environment variables that virtualenv exports in its bin/activate script or using a bash script to launch the app from within the virtual environment. I chose the latter route because it’s pretty simple and it can be convenient to have the script around for other tasks.  The script, which I place in a my_app/script folder, follows.</p>
 
-<p><a href="https://gist.github.com/1153271">https://gist.github.com/1153271</a></p>
+<p><script src="https://gist.github.com/mrowl/1153271.js"></script></p>
 
 <p>And in the supervisor conf file:</p>
 
